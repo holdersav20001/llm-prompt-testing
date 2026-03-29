@@ -70,13 +70,44 @@ Write a Lambda function that reads from Kafka and writes to an S3 file.
 Must be efficient, include error handling, instrumentation and appropriate logging.
 ```
 
-### System Prompt
+### System Prompts Tested
 
+Four system prompt variants were run across the experiment series, from generic to domain-specific:
+
+**SP-A — Generic one-liners** (control group, explanatory task only)
+Variants: no prompt / "You are a helpful assistant." / "expert technical writer" / bullet-point constraints / Alex persona
+
+**SP-B — Senior Developer skill** (Claude Code superpowers skill)
+```
+The Senior Developer skill equips Claude with a pragmatic engineering mindset,
+focusing on architectural trade-offs, code quality standards, and long-term
+maintainability. It provides a comprehensive framework for evaluating when to
+refactor, how to implement robust type safety, and how to balance development
+speed with thoroughness, ensuring that every code change is intentional, secure,
+and aligned with professional industry best practices.
+```
+
+**SP-C — Senior AWS Developer** (domain-specific role, no quality constraints)
+```
+# Senior AWS Developer — Kafka · Lambda · S3
+You are acting as a senior AWS engineer. You write clean, secure, cost-aware
+code and infrastructure. Default IaC is AWS CDK v2 (Python). Always follow
+least-privilege IAM, encrypt at rest and in transit, and call out trade-offs
+explicitly.
+```
+
+**SP-D — Senior AWS Developer + quality constraints** (final benchmark SP)
 ```
 # Senior AWS Developer — Kafka · Lambda · S3
 Code must be testable, performant, modularised, not a big chunk of code,
 easy to understand and performant.
+[...full AWS developer role as above...]
 ```
+
+The 13-model benchmark used **SP-D**. Earlier runs with SP-B showed Claude Sonnet 4.6
+dominating through superior pattern selection — the generic skill prompt left quality
+entirely up to the model. Switching to SP-D (domain-specific + explicit quality
+constraints) levelled the field and allowed cheaper models to compete.
 
 ### Results (scored out of 60)
 
@@ -104,7 +135,9 @@ easy to understand and performant.
 
 ### 1. System prompt specificity beats model size
 
-With a generic "Senior Developer" system prompt, Claude Sonnet 4.6 dominated through superior pattern selection (streaming generators, `execute_values`, Secrets Manager). With a tight quality-constraints SP ("testable, performant, modularised"), smaller/cheaper models closed the gap significantly — kimi-k2.5 at ~$0.001/call matched Sonnet at ~$0.13/call on overall score.
+With the generic **Senior Developer skill** (SP-B) — a Claude Code superpowers prompt focused on pragmatic engineering mindset and code quality — Claude Sonnet 4.6 dominated. It selected superior patterns unprompted: streaming generators to avoid OOM on large S3 files, `execute_values` bulk insert over `executemany`, AWS Secrets Manager over raw env vars. The generic skill gave no domain constraints, so output quality was entirely model-dependent.
+
+Switching to the domain-specific **Senior AWS Developer + quality constraints** SP (SP-D) levelled the field. Smaller/cheaper models closed the gap significantly — kimi-k2.5 at ~$0.001/call matched Sonnet at ~$0.13/call on overall score. The explicit constraints ("testable, performant, modularised") acted as a quality equaliser that the generic skill could not provide.
 
 ### 2. The correct MSK partial failure pattern separated the top models
 
