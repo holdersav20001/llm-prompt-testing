@@ -1,6 +1,41 @@
-venv/
+# Environment & secrets
 .env
-data/results.db
+*.env
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Database (local experiment results)
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Raw LLM response files (manually saved outputs)
+gpt response
+opus 4.6
+opus4.6/
+
+# Playwright inspection scripts
+inspect_dashboard.py
+inspect_dashboard2.py
+
+# Screenshots
+screenshots/

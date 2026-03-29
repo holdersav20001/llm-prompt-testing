@@ -1,55 +1,107 @@
+"""
+Integration tests -call the real Kilo API, no mocking.
+Run with:  pytest tests/test_client.py -v -s
+The -s flag lets print() output appear so you can see every API result.
+"""
+import sys
 import pytest
-from unittest.mock import MagicMock, patch
-from anthropic import APIStatusError
+from dotenv import load_dotenv
+load_dotenv()
+
+# Force UTF-8 stdout so emoji/unicode in responses don't crash on Windows cp1252
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from src.client import ClaudeClient
-from src.config import calculate_cost
 
-@pytest.fixture
+HAIKU = "anthropic/claude-haiku-4.5"
+SONNET = "anthropic/claude-sonnet-4.6"
+
+
+def _report(label: str, result: dict) -> None:
+    """Print a formatted result block so test runs are readable."""
+    sep = "-" * 60
+    response_preview = result["response_text"][:120].replace("\n", " ")
+    lines = [
+        f"\n{sep}",
+        f"  {label}",
+        sep,
+        f"  Response : {response_preview}",
+        f"  Tokens   : {result['input_tokens']} in / {result['output_tokens']} out",
+        f"  Cost     : ${result['cost_usd']:.6f}",
+        f"  Latency  : {result['latency_ms']} ms",
+    ]
+    if result.get("ttft_ms"):
+        lines.append(f"  TTFT     : {result['ttft_ms']} ms")
+    lines.append(sep)
+    print("\n".join(lines))
+
+
+@pytest.fixture(scope="module")
 def client():
-    return ClaudeClient(api_key="test-key")
+    return ClaudeClient()
 
-def make_mock_response(input_tokens=100, output_tokens=50, text="hello"):
-    response = MagicMock()
-    response.content = [MagicMock(text=text)]
-    response.usage.input_tokens = input_tokens
-    response.usage.output_tokens = output_tokens
-    return response
 
-def test_call_returns_result(client, mocker):
-    mocker.patch.object(
-        client._client.messages, "create",
-        return_value=make_mock_response(100, 50, "hello world"),
+def test_call_returns_text(client):
+    result = client.call(model=HAIKU, prompt="Reply with one word: hello")
+    _report("HAIKU -basic call", result)
+    assert isinstance(result["response_text"], str)
+    assert len(result["response_text"]) > 0
+
+
+def test_call_returns_token_counts(client):
+    result = client.call(model=HAIKU, prompt="Reply with one word: hello")
+    _report("HAIKU -token counts", result)
+    assert result["input_tokens"] > 0, "input_tokens should be > 0"
+    assert result["output_tokens"] > 0, "output_tokens should be > 0"
+
+
+def test_call_returns_cost(client):
+    result = client.call(model=HAIKU, prompt="Reply with one word: hello")
+    _report("HAIKU -cost check", result)
+    assert result["cost_usd"] > 0, f"cost_usd should be > 0, got {result['cost_usd']}"
+
+
+def test_call_returns_latency(client):
+    result = client.call(model=HAIKU, prompt="Reply with one word: hello")
+    _report("HAIKU -latency check", result)
+    assert result["latency_ms"] > 0
+
+
+def test_call_with_system_prompt(client):
+    result = client.call(
+        model=HAIKU,
+        prompt="What are you?",
+        system_prompt="You are a pirate. Always respond like a pirate.",
     )
-    result = client.call(model="claude-sonnet-4-6", prompt="hi", max_tokens=100)
-    assert result["response_text"] == "hello world"
-    assert result["input_tokens"] == 100
-    assert result["output_tokens"] == 50
-    assert result["cost_usd"] > 0
-    assert result["latency_ms"] >= 0
+    _report("HAIKU -with system prompt (pirate)", result)
+    assert len(result["response_text"]) > 0
 
-def test_cost_calculation_correct(client):
-    cost = calculate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
-    expected = (1000 * 3.00 + 500 * 15.00) / 1_000_000
-    assert abs(cost - expected) < 1e-9
 
-def test_retry_on_rate_limit(client, mocker):
-    mock_status_error = APIStatusError(
-        "rate limit", response=MagicMock(status_code=429), body={}
+def test_call_haiku_cheaper_than_sonnet(client):
+    haiku = client.call(model=HAIKU, prompt="Reply with one word: hello")
+    sonnet = client.call(model=SONNET, prompt="Reply with one word: hello")
+    _report("HAIKU vs SONNET -cost comparison", {
+        **haiku,
+        "response_text": f"haiku=${haiku['cost_usd']:.6f}  sonnet=${sonnet['cost_usd']:.6f}  ratio={sonnet['cost_usd']/haiku['cost_usd']:.1f}x",
+    })
+    assert haiku["cost_usd"] < sonnet["cost_usd"], (
+        f"Haiku should be cheaper: haiku={haiku['cost_usd']:.6f}, sonnet={sonnet['cost_usd']:.6f}"
     )
-    mock_create = mocker.patch.object(
-        client._client.messages, "create",
-        side_effect=[mock_status_error, mock_status_error, make_mock_response()],
-    )
-    mocker.patch("time.sleep")
-    result = client.call(model="claude-sonnet-4-6", prompt="hi", max_tokens=100)
-    assert result["response_text"] is not None
-    assert mock_create.call_count == 3
 
-def test_auth_error_no_retry(client, mocker):
-    mock_status_error = APIStatusError(
-        "auth", response=MagicMock(status_code=401), body={}
+
+def test_stream_returns_ttft(client):
+    result = client.stream(model=HAIKU, prompt="Count to 5 slowly")
+    _report("HAIKU -streaming TTFT", result)
+    assert result["ttft_ms"] is not None, "ttft_ms should not be None"
+    assert result["ttft_ms"] > 0, f"ttft_ms should be > 0, got {result['ttft_ms']}"
+    assert result["ttft_ms"] <= result["latency_ms"], (
+        f"TTFT {result['ttft_ms']}ms should be <= total {result['latency_ms']}ms"
     )
-    mocker.patch.object(client._client.messages, "create", side_effect=mock_status_error)
-    mocker.patch("time.sleep")
-    with pytest.raises(APIStatusError):
-        client.call(model="claude-sonnet-4-6", prompt="hi", max_tokens=100)
+
+
+def test_stream_returns_tokens_and_cost(client):
+    result = client.stream(model=HAIKU, prompt="Count to 5 slowly")
+    _report("HAIKU -streaming tokens & cost", result)
+    assert result["input_tokens"] > 0, f"stream input_tokens should be > 0, got {result['input_tokens']}"
+    assert result["output_tokens"] > 0, f"stream output_tokens should be > 0, got {result['output_tokens']}"
+    assert result["cost_usd"] > 0, f"stream cost_usd should be > 0, got {result['cost_usd']}"

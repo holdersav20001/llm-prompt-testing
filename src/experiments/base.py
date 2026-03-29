@@ -4,10 +4,11 @@ from src.config import ExperimentConfig, ExperimentResult
 
 
 class BaseExperiment:
-    def __init__(self, client: ClaudeClient, storage: SQLiteStorage, config: ExperimentConfig):
+    def __init__(self, client: ClaudeClient, storage: SQLiteStorage, config: ExperimentConfig, run_id: str = ""):
         self.client = client
         self.storage = storage
         self.config = config
+        self.run_id = run_id
 
     def run(self) -> list[ExperimentResult]:
         raise NotImplementedError
@@ -25,6 +26,7 @@ class BaseExperiment:
         raw = self.client.call(**call_kwargs)
 
         result = ExperimentResult(
+            run_id=self.run_id or None,
             experiment=self.config.name,
             model=call_kwargs["model"],
             prompt=call_kwargs["prompt"],

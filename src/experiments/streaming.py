@@ -14,6 +14,7 @@ class StreamingExperiment(BaseExperiment):
             max_tokens=self.config.max_tokens,
         )
         batch_result = ExperimentResult(
+            run_id=self.run_id or None,
             experiment=self.config.name,
             model=self.config.model,
             prompt=self.config.prompt,
@@ -34,6 +35,7 @@ class StreamingExperiment(BaseExperiment):
             max_tokens=self.config.max_tokens,
         )
         stream_result = ExperimentResult(
+            run_id=self.run_id or None,
             experiment=self.config.name,
             model=self.config.model,
             prompt=self.config.prompt,

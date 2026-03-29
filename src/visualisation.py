@@ -2,27 +2,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from src.config import ExperimentResult
-from src.experiments.temperature import TemperatureSweepExperiment
-
-
-def plot_temperature_sweep(results: list[ExperimentResult]) -> go.Figure:
-    by_temp: dict[float, list[str]] = {}
-    for r in results:
-        key = r.temperature or 0.0
-        by_temp.setdefault(key, []).append(r.response_text)
-
-    temps = sorted(by_temp.keys())
-    similarities = [TemperatureSweepExperiment.similarity(by_temp[t]) for t in temps]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=temps, y=similarities, mode="lines+markers", name="Similarity"))
-    fig.update_layout(
-        title="Temperature vs Response Consistency",
-        xaxis_title="Temperature",
-        yaxis_title="Similarity Score (0–1)",
-        yaxis=dict(range=[0, 1]),
-    )
-    return fig
 
 
 def plot_system_prompts(results: list[ExperimentResult]) -> go.Figure:
@@ -48,7 +27,7 @@ def plot_system_prompts(results: list[ExperimentResult]) -> go.Figure:
 def plot_model_comparison(results: list[ExperimentResult]) -> go.Figure:
     rows = [
         {
-            "model": r.model.split("-")[1],
+            "model": r.model.split("/")[-1],
             "latency_ms": r.latency_ms,
             "cost_usd_per_1k": round(r.cost_usd * 1000, 4),
             "output_tokens": r.output_tokens,
@@ -69,7 +48,7 @@ def plot_model_comparison(results: list[ExperimentResult]) -> go.Figure:
 def plot_token_usage(results: list[ExperimentResult]) -> go.Figure:
     rows = [
         {
-            "label": f"{r.params.get('prompt_length', '?')} / {r.model.split('-')[1]}",
+            "label": f"{r.params.get('prompt_length', '?')} / {r.model.split('/')[-1]}",
             "input_tokens": r.input_tokens,
             "output_tokens": r.output_tokens,
         }
@@ -94,4 +73,53 @@ def plot_streaming(results: list[ExperimentResult]) -> go.Figure:
     fig.add_trace(go.Bar(name="Stream — Total", x=["Total Time (ms)"], y=[stream.latency_ms]))
     fig.add_trace(go.Bar(name="Stream — TTFT", x=["Time to First Token (ms)"], y=[stream.ttft_ms or 0]))
     fig.update_layout(barmode="group", title="Streaming vs Batch: Latency")
+    return fig
+
+
+def plot_matrix_summary(results: list[ExperimentResult]) -> go.Figure:
+    rows = [
+        {
+            "label": f"{r.params.get('model', r.model.split('/')[-1])} | {r.params.get('system_prompt', '?')} | {r.params.get('prompt', '?')}",
+            "model": r.params.get("model", r.model.split("/")[-1]),
+            "output_tokens": r.output_tokens,
+            "latency_ms": r.latency_ms,
+            "cost_usd": r.cost_usd,
+        }
+        for r in results
+        if r.params.get("mode", "batch") == "batch"
+    ]
+    if not rows:
+        return go.Figure()
+    df = pd.DataFrame(rows)
+    fig = px.bar(
+        df,
+        x="label",
+        y="output_tokens",
+        color="model",
+        title="Matrix Run: Output Tokens by Combination",
+        labels={"label": "", "output_tokens": "Output Tokens"},
+    )
+    fig.update_xaxes(tickangle=45)
+    fig.update_layout(height=450)
+    return fig
+
+
+def plot_temperature_sweep(results: list[ExperimentResult]) -> go.Figure:
+    rows = [
+        {
+            "temperature": str(r.temperature),
+            "output_tokens": r.output_tokens,
+            "response_length": len(r.response_text),
+            "latency_ms": r.latency_ms,
+        }
+        for r in results
+    ]
+    df = pd.DataFrame(rows)
+    fig = px.bar(
+        df,
+        x="temperature",
+        y=["output_tokens", "response_length"],
+        barmode="group",
+        title="Temperature Sweep: Effect on Output Tokens and Response Length",
+    )
     return fig
